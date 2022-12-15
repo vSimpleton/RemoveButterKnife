@@ -14,4 +14,12 @@
     <extensions defaultExtensionNs="com.intellij">
 
     </extensions>
+
+    <actions>
+        <action id="com.imiyar.removebutterknife" class="com.imiyar.removebutterknife.RemoveAction"
+                text="RemoveButterKnife">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+
 </idea-plugin>
