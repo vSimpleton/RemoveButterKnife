@@ -73,7 +73,7 @@ class Entrance(private val event: AnActionEvent) {
             currFileIndex++
             try {
                 writeAction(psiFile) {
-                    val parsed = ButterActionDelegate(project!!, psiFile, psiClass).parse()
+                    val parsed = ButterActionDelegate(project!!, vFile, psiFile, psiClass).parse()
                     if (parsed) {
                         parsedFileCount++
                     }
