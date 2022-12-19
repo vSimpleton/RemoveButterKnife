@@ -2,13 +2,13 @@ package com.imiyar.removebutterknife
 
 import com.google.gson.JsonParser
 import com.imiyar.removebutterknife.utils.getLayoutRes
+import com.imiyar.removebutterknife.utils.isOnlyContainsTarget
 import com.imiyar.removebutterknife.utils.underLineToHump
 import com.imiyar.removebutterknife.utils.withViewBinding
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
-import org.jetbrains.uast.util.isInstanceOf
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -33,14 +33,16 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         // 并把setContentView()修改为使用setContentView(mBinding.root)，注意：区分Activity跟Fragment
         addViewBindingStatement()
 
-        // ...
         // 遍历保存所有使用@BindView注解的变量名称
+        findAllBindViewAnnotation()
+
         // 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
         // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
+        changeAllBindViewFields()
         // 新增onClick方法，把原本使用@OnClick注解的方法改为常规的ClickListener
         // 遍历删除所有@BindView注解以及@OnClick注解相关的代码
 
-        // 删除ButterKnife的bind语句
+        // 删除ButterKnife的import语句、绑定语句、解绑语句
         deleteButterKnifeBindStatement()
 
         return true
@@ -154,7 +156,52 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
     }
 
     /**
-     * 删除ButterKnife的绑定语句
+     * 遍历保存所有使用@BindView注解的变量名称
+     */
+    private fun findAllBindViewAnnotation() {
+        psiClass.fields.forEach {
+            it.annotations.forEach { psiAnnotation ->
+                if (psiAnnotation.qualifiedName?.contains("BindView") == true) {
+                    val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
+                    val second = it.name
+                    bindViewFieldsLists.add(Pair(first, second))
+
+                    writeAction {
+                        // 删除@BindView注解相关的字段
+                        it.delete()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
+     */
+    private fun changeAllBindViewFields() {
+        psiClass.methods.forEach {
+            it.body?.statements?.forEach { statement ->
+                var replaceText = statement.text.trim()
+                bindViewFieldsLists.forEachIndexed { index, pair ->
+                    if (replaceText.isOnlyContainsTarget(pair.second) && !replaceText.isOnlyContainsTarget("R.id.${pair.second}")) {
+                        replaceText = replaceText.replace(pair.second, "mBinding.${pair.first.underLineToHump()}")
+                    }
+                    if (index == bindViewFieldsLists.size - 1) {
+                        if (replaceText != statement.text.trim()) {
+                            val replaceStatement = elementFactory.createStatementFromText(replaceText, it)
+                            writeAction {
+                                it.addBefore(replaceStatement, statement)
+                                statement.delete()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 删除ButterKnife的import语句、绑定语句、解绑语句
      */
     private fun deleteButterKnifeBindStatement() {
         psiClass.methods.forEach {

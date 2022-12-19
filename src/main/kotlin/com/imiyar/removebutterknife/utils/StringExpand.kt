@@ -38,3 +38,12 @@ fun String.withViewBinding(): String {
     builder.append(this.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }).append("Binding")
     return builder.toString()
 }
+
+fun String.isOnlyContainsTarget(target: String): Boolean {
+    val regex = "\\b$target\\b"
+    val mather = Pattern.compile(regex).matcher(this)
+    if (mather.find()) {
+        return true
+    }
+    return false
+}
