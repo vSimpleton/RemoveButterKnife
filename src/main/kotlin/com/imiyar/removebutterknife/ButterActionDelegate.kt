@@ -8,6 +8,7 @@ import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.*
+import org.jetbrains.uast.util.isInstanceOf
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -18,16 +19,21 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
 
     private val elementFactory = JavaPsiFacade.getInstance(project).elementFactory
 
+    /**
+     * 存储所有使用@BindView注解的变量名称，示例Pair<xml属性名称，class变量名称>
+     */
+    private val bindViewFieldsLists = mutableListOf<Pair<String, String>>()
+
     fun parse(): Boolean {
         if (!checkIsNeedModify()) {
             return false
         }
 
         // 新增Binding类实例并写进class的全局变量里
+        // 并把setContentView()修改为使用setContentView(mBinding.root)，注意：区分Activity跟Fragment
         addViewBindingStatement()
 
         // ...
-        // setContentView()修改为使用setContentView(mBinding.root)，注意：区分Activity跟Fragment
         // 遍历保存所有使用@BindView注解的变量名称
         // 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
         // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
@@ -41,24 +47,66 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
     }
 
     /**
+     * 修改setContentView语句
+     */
+    private fun changeSetContentViewStatement(bindingName: String) {
+        psiClass.methods.forEach {
+            if (it.name == "onCreate") {
+                it.body?.statements?.forEach { statement ->
+                    if (statement.firstChild.text.trim().contains("setContentView(")) {
+                        val bindingStatement = elementFactory.createStatementFromText("setContentView(mBinding.getRoot());", it)
+                        writeAction {
+                            it.addBefore(bindingStatement, statement)
+                            statement.delete()
+                        }
+                    }
+                }
+            } else if (it.name == "onCreateView") {
+                // 需要删除的语句锚点有：inflater.inflate( 、 return
+                it.body?.statements?.forEach { statement ->
+                    if (statement.firstChild.text.trim().contains("inflater.inflate(")) {
+                        val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${it.parameters[0].name}, ${it.parameters[1].name}, false);", it)
+                        writeAction {
+                            it.addBefore(bindingStatement, statement)
+                            statement.delete()
+                        }
+                    } else if (statement.firstChild.text.trim().contains("return")) {
+                        val returnStatement = elementFactory.createStatementFromText("return mBinding.getRoot();", it)
+                        writeAction {
+                            it.addBefore(returnStatement, statement)
+                            statement.delete()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * 添加ViewBinding的实例
      */
     private fun addViewBindingStatement() {
         var layoutRes = ""
+        var psiField: PsiField? = null
+        var bindingName = ""
         psiClass.methods.forEach {
             if (it.name.contains("onCreate") || it.name.contains("onCreateView")) {
                 it.body?.statements?.forEach { statement ->
                     // 拿到布局名称
                     if (statement.firstChild.text.trim().contains("R.layout.")) {
                         layoutRes = statement.firstChild.text.trim().getLayoutRes()
+                        // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
+                        bindingName = layoutRes.underLineToHump().withViewBinding()
+                        // 把转换后的Binding实例名称以及实例化语句添加进class类里
+                        if (it.name =="onCreate") {
+                            psiField = elementFactory.createFieldFromText("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n", psiClass)
+                        } else if (it.name == "onCreateView") {
+                            psiField = elementFactory.createFieldFromText("private $bindingName mBinding;\n", psiClass)
+                        }
                     }
                 }
             }
         }
-        // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
-        val bindingName = layoutRes.underLineToHump().withViewBinding()
-        // 把转换后的Binding实例名称以及实例化语句添加进class类里
-        val psiField = elementFactory.createFieldFromText("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n", psiClass)
 
         // 下面的操作用于获取Binding类生成的映射关系的目录，会拿到一个Json文件
         var fileName = vFile.parent
@@ -81,8 +129,14 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         val importStatement = elementFactory.createImportStatementOnDemand(bindImportClass)
 
         writeAction {
-            psiClass.addAfter(psiField, psiClass.allFields.last())
-            importList?.add(importStatement)
+            psiField?.let {
+                psiClass.addAfter(it, psiClass.allFields.last())
+                importList?.add(importStatement)
+            }
+        }
+
+        if (bindingName.isNotEmpty()) {
+            changeSetContentViewStatement(bindingName)
         }
     }
 
