@@ -24,6 +24,12 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      */
     private val bindViewFieldsLists = mutableListOf<Pair<String, String>>()
 
+    /**
+     * 存储所有使用@OnClick注解的方法名称，示例Pair<xml属性名称，方法名称(参数)>
+     */
+    private val onClickMethodsLists = mutableListOf<Pair<String, String>>()
+    private val clickStatementsLists = mutableListOf<PsiElement>()
+
     fun parse(): Boolean {
         if (!checkIsNeedModify()) {
             return false
@@ -37,15 +43,41 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         findAllBindViewAnnotation()
 
         // 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
+        findAllOnClickMethodAnnotation()
+
         // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
         changeAllBindViewFields()
-        // 新增onClick方法，把原本使用@OnClick注解的方法改为常规的ClickListener
-        // 遍历删除所有@BindView注解以及@OnClick注解相关的代码
+
+        // 把原本使用@OnClick注解的方法改为常规的ClickListener
+        addAllOnClickMethods()
 
         // 删除ButterKnife的import语句、绑定语句、解绑语句
         deleteButterKnifeBindStatement()
 
         return true
+    }
+
+    /**
+     * 把原本使用@OnClick注解的方法改为常规的ClickListener
+     */
+    private fun addAllOnClickMethods() {
+        // TODO 需要考虑出Activity之外的其他类
+        val psiMethods = psiClass.findMethodsByName("onCreate", false)
+        if (psiMethods.isNotEmpty()) {
+            val psiStatement = elementFactory.createStatementFromText("initListener();", psiMethods[0])
+            val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
+
+            writeAction {
+                onClickMethodsLists.forEach {
+                    val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
+                    val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                    createMethod.lastChild.add(statement)
+                }
+
+                psiMethods[0].addAfter(psiStatement, psiMethods[0].body?.statements?.last())
+                psiClass.addAfter(createMethod, psiMethods[0])
+            }
+        }
     }
 
     /**
@@ -67,6 +99,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 // 需要删除的语句锚点有：inflater.inflate( 、 return
                 it.body?.statements?.forEach { statement ->
                     if (statement.firstChild.text.trim().contains("inflater.inflate(")) {
+                        // TODO 需要先判断方法是否有参数
                         val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${it.parameters[0].name}, ${it.parameters[1].name}, false);", it)
                         writeAction {
                             it.addBefore(bindingStatement, statement)
@@ -92,7 +125,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         var psiField: PsiField? = null
         var bindingName = ""
         psiClass.methods.forEach {
-            if (it.name.contains("onCreate") || it.name.contains("onCreateView")) {
+            if (it.name == "onCreate" || it.name == "onCreateView") {
                 it.body?.statements?.forEach { statement ->
                     // 拿到布局名称
                     if (statement.firstChild.text.trim().contains("R.layout.")) {
@@ -194,6 +227,29 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                                 statement.delete()
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
+     */
+    private fun findAllOnClickMethodAnnotation() {
+        psiClass.methods.forEach {
+            it.annotations.forEach { psiAnnotation ->
+                if (psiAnnotation.qualifiedName?.contains("OnClick") == true) {
+                    val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
+                    var second = "${it.name}()"
+                    if (it.parameters.isNotEmpty()) {
+                        second = "${it.name}(view)"
+                    }
+                    onClickMethodsLists.add(Pair(first, second))
+
+                    writeAction {
+                        // 删除@OnClick注解
+                        psiAnnotation.delete()
                     }
                 }
             }

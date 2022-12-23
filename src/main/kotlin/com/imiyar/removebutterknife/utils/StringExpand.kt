@@ -8,7 +8,7 @@ import java.util.regex.Pattern
  * 下划线转驼峰
  */
 fun String.underLineToHump(): String {
-    val regex = "_(.)"
+    val regex = "_(\\w)"
     val mather = Pattern.compile(regex).matcher(this)
     var result = this
     while (mather.find()) {
