@@ -28,7 +28,6 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 存储所有使用@OnClick注解的方法名称，示例Pair<xml属性名称，方法名称(参数)>
      */
     private val onClickMethodsLists = mutableListOf<Pair<String, String>>()
-    private val clickStatementsLists = mutableListOf<PsiElement>()
 
     fun parse(): Boolean {
         if (!checkIsNeedModify()) {
@@ -260,8 +259,33 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 删除ButterKnife的import语句、绑定语句、解绑语句
      */
     private fun deleteButterKnifeBindStatement() {
-        psiClass.methods.forEach {
+        writeAction {
+            psiJavaFile.importList?.importStatements?.forEach {
+                if (it.qualifiedName?.toLowerCase()?.contains("butterknife") == true) {
+                    it.delete()
+                }
+            }
 
+            psiClass.methods.forEach {
+                it.body?.statements?.forEach { statement ->
+                    if (statement.firstChild.text.trim().contains("ButterKnife.bind(")) {
+                        statement.delete()
+                    }
+                }
+            }
+
+            val unBinderField = psiClass.fields.find {
+                it.type.canonicalText.contains("Unbinder")
+            }
+            if (unBinderField != null) {
+                psiClass.methods.forEach {
+                    it.body?.statements?.forEach { statement ->
+                        if (statement.firstChild.text.trim().contains(unBinderField.name)) {
+                            statement.delete()
+                        }
+                    }
+                }
+            }
         }
     }
 
