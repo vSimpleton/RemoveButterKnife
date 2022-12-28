@@ -44,39 +44,10 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         // 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
         findAllOnClickMethodAnnotation()
 
-        // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
-        changeAllBindViewFields()
-
-        // 把原本使用@OnClick注解的方法改为常规的ClickListener
-        addAllOnClickMethods()
-
         // 删除ButterKnife的import语句、绑定语句、解绑语句
         deleteButterKnifeBindStatement()
 
         return true
-    }
-
-    /**
-     * 把原本使用@OnClick注解的方法改为常规的ClickListener
-     */
-    private fun addAllOnClickMethods() {
-        // TODO 需要考虑出Activity之外的其他类
-        val psiMethods = psiClass.findMethodsByName("onCreate", false)
-        if (psiMethods.isNotEmpty()) {
-            val psiStatement = elementFactory.createStatementFromText("initListener();", psiMethods[0])
-            val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
-
-            writeAction {
-                onClickMethodsLists.forEach {
-                    val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
-                    val statement = elementFactory.createStatementFromText(statementStr, psiClass)
-                    createMethod.lastChild.add(statement)
-                }
-
-                psiMethods[0].addAfter(psiStatement, psiMethods[0].body?.statements?.last())
-                psiClass.addAfter(createMethod, psiMethods[0])
-            }
-        }
     }
 
     /**
@@ -142,23 +113,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
             }
         }
 
-        // 下面的操作用于获取Binding类生成的映射关系的目录，会拿到一个Json文件
-        var fileName = vFile.parent
-        while (!fileName.toString().endsWith("src")) {
-            fileName = fileName.parent
-        }
-        // 这里的作用是为了区分不同的module拿到的文件路径
-        val dataBindingDir = "${fileName.parent.path}/build/intermediates/data_binding_base_class_log_artifact/debug/out/"
-        var jsonFile = File(dataBindingDir)
-        if (jsonFile.isDirectory) {
-            if (jsonFile.listFiles() != null && jsonFile.listFiles().isNotEmpty()) {
-                jsonFile = jsonFile.listFiles()[0]
-            }
-        }
-        // 拿到json文件并拿到我们需要的Binding类包名，用于添加import
-        val jsonObject = JsonParser.parseString(readJsonFile(jsonFile)).asJsonObject
-        val bindImportClass = jsonObject.get("mappings").asJsonObject.get(layoutRes).asJsonObject.get("module_package").asString
-
+        val bindImportClass = getBindingJsonFile(layoutRes)
         val importList = psiJavaFile.importList
         val importStatement = elementFactory.createImportStatementOnDemand(bindImportClass)
 
@@ -172,6 +127,51 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         if (bindingName.isNotEmpty()) {
             changeSetContentViewStatement(bindingName)
         }
+    }
+
+    /**
+     * 获取生成的Binding映射文件，并拿到该Binding类的包路径
+     */
+    private fun getBindingJsonFile(layoutRes: String): String {
+        val listFilesName = mutableListOf<String>()
+        var fileName = vFile.parent
+        while (!fileName.toString().endsWith("src")) {
+            fileName = fileName.parent
+        }
+
+        val dataBindingDir = "${fileName.parent.parent.path}${File.separator}"
+        val jsonFile = File(dataBindingDir)
+        if (jsonFile.isDirectory) {
+            jsonFile.listFiles()?.forEach {
+                if (it.isDirectory && !it.isHidden) {
+                    listFilesName.add(it.absolutePath)
+                }
+            }
+        }
+        listFilesName.forEach {
+            println("$it/build/intermediates/data_binding_base_class_log_artifact/debug/out/")
+        }
+        var bindImportClass = ""
+        listFilesName.forEach {
+            val fileStr = "$it/build/intermediates/data_binding_base_class_log_artifact/debug/out/"
+            var jsonFile = File(fileStr)
+            if (jsonFile.isDirectory) {
+                if (jsonFile.listFiles() != null && jsonFile.listFiles().isNotEmpty()) {
+                    jsonFile = jsonFile.listFiles()[0]
+                }
+            }
+            // 拿到json文件并拿到我们需要的Binding类包名，用于添加import
+            if (jsonFile.isFile) {
+                val jsonObject = JsonParser.parseString(readJsonFile(jsonFile)).asJsonObject
+                if (jsonObject.get("mappings").asJsonObject.get(layoutRes) != null) {
+                    bindImportClass = jsonObject.get("mappings").asJsonObject.get(layoutRes).asJsonObject.get("module_package").asString
+                }
+            }
+            if (bindImportClass.isNotEmpty()) {
+                return@forEach
+            }
+        }
+        return bindImportClass
     }
 
     /**
@@ -205,6 +205,9 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 }
             }
         }
+
+        // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
+        changeAllBindViewFields()
     }
 
     /**
@@ -216,7 +219,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 var replaceText = statement.text.trim()
                 bindViewFieldsLists.forEachIndexed { index, pair ->
                     if (replaceText.isOnlyContainsTarget(pair.second) && !replaceText.isOnlyContainsTarget("R.id.${pair.second}")) {
-                        replaceText = replaceText.replace(pair.second, "mBinding.${pair.first.underLineToHump()}")
+                        replaceText = replaceText.replace("\\b${pair.second}\\b".toRegex(), "mBinding.${pair.first.underLineToHump()}")
                     }
                     if (index == bindViewFieldsLists.size - 1) {
                         if (replaceText != statement.text.trim()) {
@@ -253,6 +256,47 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 }
             }
         }
+
+        // 把原本使用@OnClick注解的方法改为常规的ClickListener
+        addAllOnClickMethods()
+    }
+
+    /**
+     * 把原本使用@OnClick注解的方法改为常规的ClickListener
+     */
+    private fun addAllOnClickMethods() {
+        // TODO 需要考虑出Activity之外的其他类
+        val psiListenerMethod = psiClass.findMethodsByName("initListener", false)
+        if (!psiListenerMethod.isNullOrEmpty()) {
+            writeAction {
+                onClickMethodsLists.forEach {
+                    val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
+                    val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                    psiListenerMethod[0].lastChild.add(statement)
+                }
+            }
+        } else {
+            var psiMethods = psiClass.findMethodsByName("onViewCreated", false)
+            if (psiMethods.isNullOrEmpty()) {
+                psiMethods = psiClass.findMethodsByName("onCreate", false)
+            }
+            if (psiMethods.isNotEmpty()) {
+                val psiStatement = elementFactory.createStatementFromText("initListener();", psiMethods[0])
+                val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
+
+                writeAction {
+                    onClickMethodsLists.forEach {
+                        val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
+                        val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                        createMethod.lastChild.add(statement)
+                    }
+
+                    psiMethods[0].addAfter(psiStatement, psiMethods[0].body?.statements?.last())
+                    psiClass.addAfter(createMethod, psiMethods[0])
+                }
+            }
+        }
+
     }
 
     /**
@@ -261,7 +305,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
     private fun deleteButterKnifeBindStatement() {
         writeAction {
             psiJavaFile.importList?.importStatements?.forEach {
-                if (it.qualifiedName?.toLowerCase()?.contains("butterknife") == true) {
+                if (it.qualifiedName?.lowercase()?.contains("butterknife") == true) {
                     it.delete()
                 }
             }
@@ -285,6 +329,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                         }
                     }
                 }
+                unBinderField.delete()
             }
         }
     }
