@@ -139,38 +139,55 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
             fileName = fileName.parent
         }
 
-        val dataBindingDir = "${fileName.parent.parent.path}${File.separator}"
-        val jsonFile = File(dataBindingDir)
-        if (jsonFile.isDirectory) {
-            jsonFile.listFiles()?.forEach {
-                if (it.isDirectory && !it.isHidden) {
-                    listFilesName.add(it.absolutePath)
-                }
-            }
-        }
-        listFilesName.forEach {
-            println("$it/build/intermediates/data_binding_base_class_log_artifact/debug/out/")
-        }
         var bindImportClass = ""
-        listFilesName.forEach {
-            val fileStr = "$it/build/intermediates/data_binding_base_class_log_artifact/debug/out/"
-            var jsonFile = File(fileStr)
-            if (jsonFile.isDirectory) {
-                if (jsonFile.listFiles() != null && jsonFile.listFiles().isNotEmpty()) {
-                    jsonFile = jsonFile.listFiles()[0]
-                }
-            }
-            // 拿到json文件并拿到我们需要的Binding类包名，用于添加import
-            if (jsonFile.isFile) {
-                val jsonObject = JsonParser.parseString(readJsonFile(jsonFile)).asJsonObject
-                if (jsonObject.get("mappings").asJsonObject.get(layoutRes) != null) {
-                    bindImportClass = jsonObject.get("mappings").asJsonObject.get(layoutRes).asJsonObject.get("module_package").asString
-                }
-            }
-            if (bindImportClass.isNotEmpty()) {
-                return@forEach
+        var moduleFile = File("${fileName.parent.path}/build/intermediates/data_binding_base_class_log_artifact/debug/out/")
+        if (moduleFile.isDirectory) {
+            if (moduleFile.listFiles() != null && moduleFile.listFiles().isNotEmpty()) {
+                moduleFile = moduleFile.listFiles()[0]
             }
         }
+        if (moduleFile.isFile) {
+            val jsonObject = JsonParser.parseString(readJsonFile(moduleFile)).asJsonObject
+            if (jsonObject.get("mappings").asJsonObject.get(layoutRes) != null) {
+                bindImportClass = jsonObject.get("mappings").asJsonObject.get(layoutRes).asJsonObject.get("module_package").asString
+            }
+        }
+
+        // 优先判断该文件所属的module下的json映射文件，若找不到需要的Binding类，再遍历所有module寻找json文件
+        if (bindImportClass.isNotEmpty()) {
+            return bindImportClass
+        } else {
+            val dataBindingDir = "${fileName.parent.parent.path}${File.separator}"
+            val file = File(dataBindingDir)
+            if (file.isDirectory) {
+                file.listFiles()?.forEach {
+                    if (it.isDirectory && !it.isHidden) {
+                        listFilesName.add(it.absolutePath)
+                    }
+                }
+            }
+
+            listFilesName.forEach {
+                val fileStr = "$it/build/intermediates/data_binding_base_class_log_artifact/debug/out/"
+                var jsonFile = File(fileStr)
+                if (jsonFile.isDirectory) {
+                    if (jsonFile.listFiles() != null && jsonFile.listFiles().isNotEmpty()) {
+                        jsonFile = jsonFile.listFiles()[0]
+                    }
+                }
+                // 拿到json文件并拿到我们需要的Binding类包名，用于添加import
+                if (jsonFile.isFile) {
+                    val jsonObject = JsonParser.parseString(readJsonFile(jsonFile)).asJsonObject
+                    if (jsonObject.get("mappings").asJsonObject.get(layoutRes) != null) {
+                        bindImportClass = jsonObject.get("mappings").asJsonObject.get(layoutRes).asJsonObject.get("module_package").asString
+                    }
+                }
+                if (bindImportClass.isNotEmpty()) {
+                    return@forEach
+                }
+            }
+        }
+
         return bindImportClass
     }
 
