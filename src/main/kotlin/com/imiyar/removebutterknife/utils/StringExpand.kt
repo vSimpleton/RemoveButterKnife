@@ -31,6 +31,21 @@ fun String.getLayoutRes(): String {
 }
 
 /**
+ * 根据字符串获取R.id或R2.id后的属性名称
+ */
+fun String.getAnnotationIds(): MutableList<String> {
+    val result = mutableListOf<String>()
+    val regex = "[R,R2]\\.id\\.(\\w+)"
+    val matcher = Pattern.compile(regex).matcher(this)
+    var indexStart = 0
+    while (matcher.find(indexStart)) {
+        result.add(matcher.group(1))
+        indexStart = matcher.end()
+    }
+    return result
+}
+
+/**
  * 首字母大写并拼接ViewBinding后缀
  */
 fun String.withViewBinding(): String {

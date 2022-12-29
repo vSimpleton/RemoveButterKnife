@@ -1,10 +1,7 @@
 package com.imiyar.removebutterknife
 
 import com.google.gson.JsonParser
-import com.imiyar.removebutterknife.utils.getLayoutRes
-import com.imiyar.removebutterknife.utils.isOnlyContainsTarget
-import com.imiyar.removebutterknife.utils.underLineToHump
-import com.imiyar.removebutterknife.utils.withViewBinding
+import com.imiyar.removebutterknife.utils.*
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -28,6 +25,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 存储所有使用@OnClick注解的方法名称，示例Pair<xml属性名称，方法名称(参数)>
      */
     private val onClickMethodsLists = mutableListOf<Pair<String, String>>()
+    private val onLongClickMethodsLists = mutableListOf<Pair<String, String>>()
 
     fun parse(): Boolean {
         if (!checkIsNeedModify()) {
@@ -317,7 +315,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         psiClass.methods.forEach {
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("OnClick") == true) {
-                    val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
+                    val first = psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.get(0).toString()
                     var second = "${it.name}()"
                     if (it.parameters.isNotEmpty()) {
                         second = "${it.name}(view)"
@@ -327,6 +325,18 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                     writeAction {
                         // 删除@OnClick注解
                         psiAnnotation.delete()
+                    }
+                } else if (psiAnnotation.qualifiedName?.contains("OnLongClick") == true) {
+                    psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.forEach { id ->
+                        var second = "${it.name}()"
+                        if (it.parameters.isNotEmpty()) {
+                            second = "${it.name}(view)"
+                        }
+                        onLongClickMethodsLists.add(Pair(id, second))
+                        writeAction {
+                            // 删除@OnClick注解
+                            psiAnnotation.delete()
+                        }
                     }
                 }
             }
@@ -349,6 +359,14 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                     val statement = elementFactory.createStatementFromText(statementStr, psiClass)
                     psiListenerMethod[0].lastChild.add(statement)
                 }
+                onLongClickMethodsLists.forEach {
+                    val statementStr = "mBinding.${it.first.underLineToHump()}.setOnLongClickListener(view -> {\n" +
+                            "${it.second};\n" +
+                            "return false;\n" +
+                            "});\n"
+                    val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                    psiListenerMethod[0].lastChild.add(statement)
+                }
             }
         } else {
             var psiMethods = psiClass.findMethodsByName("onViewCreated", false)
@@ -362,6 +380,15 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 writeAction {
                     onClickMethodsLists.forEach {
                         val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
+                        val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                        createMethod.lastChild.add(statement)
+                    }
+
+                    onLongClickMethodsLists.forEach {
+                        val statementStr = "mBinding.${it.first.underLineToHump()}.setOnLongClickListener(view -> {\n" +
+                                "${it.second};\n" +
+                                "return false;\n" +
+                                "});\n"
                         val statement = elementFactory.createStatementFromText(statementStr, psiClass)
                         createMethod.lastChild.add(statement)
                     }
