@@ -15,11 +15,17 @@ import java.util.*
 class ButterActionDelegate(private val project: Project, private val vFile: VirtualFile, private val psiJavaFile: PsiJavaFile, private val psiClass: PsiClass) {
 
     private val elementFactory = JavaPsiFacade.getInstance(project).elementFactory
+    private var mPsiClass = psiClass
 
     /**
-     * 存储所有使用@BindView注解的变量名称，示例Pair<xml属性名称，class变量名称>
+     * 外部类使用，存储所有使用@BindView注解的变量名称，示例Pair<xml属性名称，class变量名称>
      */
     private val bindViewFieldsLists = mutableListOf<Pair<String, String>>()
+
+    /**
+     * 内部类使用，存储所有使用@BindView注解的变量名称，示例Pair<xml属性名称，class变量名称>
+     */
+    private val innerBindViewFieldsLists = mutableListOf<Pair<String, String>>()
 
     /**
      * 存储所有使用@OnClick注解的方法名称，示例Pair<xml属性名称，方法名称(参数)>
@@ -45,6 +51,9 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
         // 删除ButterKnife的import语句、绑定语句、解绑语句
         deleteButterKnifeBindStatement()
 
+        // 内部类
+        handleInnerClass(mPsiClass.innerClasses)
+
         return true
     }
 
@@ -53,12 +62,12 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 区分Activity、Fragment、自定义View、Dialog、Adapter
      */
     private fun addViewBindingStatement() {
-        var methods = psiClass.findMethodsByName("onCreateView", false)
+        var methods = mPsiClass.findMethodsByName("onCreateView", false)
         if (methods.isEmpty()) {
-            methods = psiClass.findMethodsByName("onCreate", false)
+            methods = mPsiClass.findMethodsByName("onCreate", false)
         }
         if (methods.isEmpty()) {
-            methods = psiClass.constructors
+            methods = mPsiClass.constructors
         }
 
         if (methods.isNotEmpty()) {
@@ -75,7 +84,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      */
     private fun changeSetContentViewStatement(bindingName: String, methods: Array<PsiMethod>) {
         run jump@{
-            psiClass.methods.forEach {
+            mPsiClass.methods.forEach {
                 if (it.name == "onCreate") {
                     it.body?.statements?.forEach { statement ->
                         if (statement.firstChild.text.trim().contains("setContentView(")) {
@@ -124,7 +133,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                     // 把转换后的Binding实例名称以及实例化语句添加进class类里
                     var psiField: PsiField? = null
                     if (methods[0].name == "onCreate") {
-                        psiField = elementFactory.createFieldFromText("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n", psiClass)
+                        psiField = elementFactory.createFieldFromText("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n", mPsiClass)
                     } else if (methods[0].name == "onCreateView" || methods[0].isConstructor) {
                         psiField = elementFactory.createFieldFromText("private $bindingName mBinding;\n", psiClass)
                     }
@@ -134,7 +143,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
 
                     writeAction {
                         psiField?.let {
-                            psiClass.addAfter(it, psiClass.allFields.last())
+                            mPsiClass.addAfter(it, mPsiClass.allFields.last())
                             importList?.add(importStatement)
                         }
                     }
@@ -154,31 +163,31 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 自定义View添加ViewBinding相关代码
      */
     private fun changeCustomViewBindingStatement(methods: Array<PsiMethod>) {
-        run jump@{
-            methods.forEach { method ->
-                method.body?.statements?.forEach { statement ->
-                    // 拿到布局名称
-                    if (statement.firstChild.text.trim().contains("R.layout.")) {
-                        val layoutRes = statement.firstChild.text.trim().getLayoutRes()
-                        // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
-                        val bindingName = layoutRes.underLineToHump().withViewBinding()
-                        val psiField = elementFactory.createFieldFromText("private $bindingName mBinding;\n", psiClass)
+        mPsiClass.methods.forEach { method ->
+            method.body?.statements?.forEach { statement ->
+                // 拿到布局名称
+                if (statement.firstChild.text.trim().contains("R.layout.")) {
+                    val layoutRes = statement.firstChild.text.trim().getLayoutRes()
+                    // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
+                    val bindingName = layoutRes.underLineToHump().withViewBinding()
+                    val psiField = elementFactory.createFieldFromText("private $bindingName mBinding;\n", mPsiClass)
 
-                        val importList = psiJavaFile.importList
-                        val importStatement = elementFactory.createImportStatementOnDemand(getBindingJsonFile(layoutRes))
+                    val importList = psiJavaFile.importList
+                    val importStatement = elementFactory.createImportStatementOnDemand(getBindingJsonFile(layoutRes))
 
-                        val replaceStatement = elementFactory.createStatementFromText("View view = ${statement.text}", method)
-                        val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", method)
+                    val replaceStatement = if (!statement.text.contains("=")) {
+                        elementFactory.createStatementFromText("View view = ${statement.text}", method)
+                    } else {
+                        elementFactory.createStatementFromText("View view = ${statement.text.trim().split("=")[1]}", method)
+                    }
+                    val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", method)
 
-                        writeAction {
-                            psiClass.addAfter(psiField, psiClass.allFields.last())
-                            importList?.add(importStatement)
-                            method.addBefore(replaceStatement, statement)
-                            method.addAfter(bindingStatement, statement)
-                            statement.delete()
-                        }
-
-                        return@jump
+                    writeAction {
+                        mPsiClass.addAfter(psiField, mPsiClass.allFields.last())
+                        importList?.add(importStatement)
+                        method.addBefore(replaceStatement, statement)
+                        method.addAfter(bindingStatement, statement)
+                        statement.delete()
                     }
                 }
             }
@@ -264,7 +273,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 遍历保存所有使用@BindView注解的变量名称
      */
     private fun findAllBindViewAnnotation() {
-        psiClass.fields.forEach {
+        mPsiClass.fields.forEach {
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("BindView") == true) {
                     val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
@@ -287,7 +296,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
      */
     private fun changeAllBindViewFields() {
-        psiClass.methods.forEach {
+        mPsiClass.methods.forEach {
             it.body?.statements?.forEach { statement ->
                 var replaceText = statement.text.trim()
                 bindViewFieldsLists.forEachIndexed { index, pair ->
@@ -312,15 +321,16 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
      * 遍历保存所有使用@OnClick注解的属性id以及对应的click方法
      */
     private fun findAllOnClickMethodAnnotation() {
-        psiClass.methods.forEach {
+        mPsiClass.methods.forEach {
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("OnClick") == true) {
-                    val first = psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.get(0).toString()
-                    var second = "${it.name}()"
-                    if (it.parameters.isNotEmpty()) {
-                        second = "${it.name}(view)"
+                    psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.forEach { id ->
+                        var second = "${it.name}()"
+                        if (it.parameters.isNotEmpty()) {
+                            second = "${it.name}(view)"
+                        }
+                        onClickMethodsLists.add(Pair(id, second))
                     }
-                    onClickMethodsLists.add(Pair(first, second))
 
                     writeAction {
                         // 删除@OnClick注解
@@ -333,25 +343,26 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                             second = "${it.name}(view)"
                         }
                         onLongClickMethodsLists.add(Pair(id, second))
-                        writeAction {
-                            // 删除@OnClick注解
-                            psiAnnotation.delete()
-                        }
+                    }
+                    writeAction {
+                        // 删除@OnLongClick注解
+                        psiAnnotation.delete()
                     }
                 }
             }
         }
 
         // 把原本使用@OnClick注解的方法改为常规的ClickListener
-        addAllOnClickMethods()
+        if (onClickMethodsLists.isNotEmpty() || onLongClickMethodsLists.isNotEmpty()) {
+            addAllOnClickMethods()
+        }
     }
 
     /**
      * 把原本使用@OnClick注解的方法改为常规的ClickListener
      */
     private fun addAllOnClickMethods() {
-        // TODO 需要考虑出Activity之外的其他类
-        val psiListenerMethod = psiClass.findMethodsByName("initListener", false)
+        val psiListenerMethod = mPsiClass.findMethodsByName("initListener", false)
         if (!psiListenerMethod.isNullOrEmpty()) {
             writeAction {
                 onClickMethodsLists.forEach {
@@ -369,18 +380,29 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 }
             }
         } else {
-            var psiMethods = psiClass.findMethodsByName("onViewCreated", false)
-            if (psiMethods.isNullOrEmpty()) {
-                psiMethods = psiClass.findMethodsByName("onCreate", false)
+            var psiMethods = mPsiClass.findMethodsByName("onViewCreated", false)
+            if (psiMethods.isEmpty()) {
+                psiMethods = mPsiClass.findMethodsByName("onCreate", false)
+            }
+            if (psiMethods.isEmpty()) {
+                psiMethods = mPsiClass.constructors
             }
             if (psiMethods.isNotEmpty()) {
-                val psiStatement = elementFactory.createStatementFromText("initListener();", psiMethods[0])
-                val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
+                var methodIndex = 0
+                psiMethods.forEachIndexed { index, method ->
+                    if (method.parameters.size > psiMethods[methodIndex].parameters.size) {
+                        methodIndex = index
+                    }
+                }
+
+                val finalMethod = if (psiMethods[0].isConstructor) psiMethods[methodIndex] else psiMethods[0]
+                val psiStatement = elementFactory.createStatementFromText("initListener();", finalMethod)
+                val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", mPsiClass)
 
                 writeAction {
                     onClickMethodsLists.forEach {
                         val statementStr = "mBinding.${it.first.underLineToHump()}.setOnClickListener(view -> ${it.second});\n"
-                        val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                        val statement = elementFactory.createStatementFromText(statementStr, mPsiClass)
                         createMethod.lastChild.add(statement)
                     }
 
@@ -389,12 +411,12 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                                 "${it.second};\n" +
                                 "return false;\n" +
                                 "});\n"
-                        val statement = elementFactory.createStatementFromText(statementStr, psiClass)
+                        val statement = elementFactory.createStatementFromText(statementStr, mPsiClass)
                         createMethod.lastChild.add(statement)
                     }
 
-                    psiMethods[0].addAfter(psiStatement, psiMethods[0].body?.statements?.last())
-                    psiClass.addAfter(createMethod, psiMethods[0])
+                    finalMethod.addAfter(psiStatement, finalMethod.body?.statements?.last())
+                    psiClass.addAfter(createMethod, finalMethod)
                 }
             }
         }
@@ -412,7 +434,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 }
             }
 
-            psiClass.methods.forEach {
+            mPsiClass.methods.forEach {
                 it.body?.statements?.forEach { statement ->
                     if (statement.firstChild.text.trim().contains("ButterKnife.bind(")) {
                         statement.delete()
@@ -424,7 +446,7 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
                 it.type.canonicalText.contains("Unbinder")
             }
             if (unBinderField != null) {
-                psiClass.methods.forEach {
+                mPsiClass.methods.forEach {
                     it.body?.statements?.forEach { statement ->
                         if (statement.firstChild.text.trim().contains(unBinderField.name)) {
                             statement.delete()
@@ -444,6 +466,65 @@ class ButterActionDelegate(private val project: Project, private val vFile: Virt
             it.qualifiedName?.lowercase(Locale.getDefault())?.contains("butterknife") == true
         }
         return importStatement != null
+    }
+
+    private fun handleInnerClass(innerClasses: Array<PsiClass>?) {
+        innerClasses?.forEach {
+            innerBindViewFieldsLists.clear()
+            onClickMethodsLists.clear()
+            onLongClickMethodsLists.clear()
+            mPsiClass = it
+            findInnerClassAllBindViewAnnotation()
+            deleteButterKnifeBindStatement()
+            handleInnerClass(it.innerClasses)
+        }
+    }
+
+    private fun findInnerClassAllBindViewAnnotation() {
+        mPsiClass.fields.forEach {
+            it.annotations.forEach { psiAnnotation ->
+                if (psiAnnotation.qualifiedName?.contains("BindView") == true) {
+                    val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
+                    val second = it.name
+                    innerBindViewFieldsLists.add(Pair(first, second))
+
+                    writeAction {
+                        // 删除@BindView注解相关的字段
+                        psiAnnotation.delete()
+                    }
+                }
+            }
+        }
+
+        // 把原本使用@BindView的变量xxx，改成mBinding.xxx(驼峰式命名)
+        // 注：这是因为内部类有可能引用外部类的xml属性，所以需要多一次判断
+        changeAllBindViewFields()
+
+        // 内部类的@BindView统一改成fvb形式
+        changeInnerAllBindViewFields()
+    }
+
+    /**
+     * 内部类的@BindView统一改成findViewById形式
+     */
+    private fun changeInnerAllBindViewFields() {
+        mPsiClass.methods.forEach jump@{ method ->
+            method.body?.statements?.forEach { statement ->
+                if (statement.firstChild.text.trim().contains("ButterKnife.bind(")) {
+                    innerBindViewFieldsLists.forEach { pair ->
+                        val psiStatement = if (mPsiClass.name?.endsWith("Holder") == true || mPsiClass.name?.endsWith("VH") == true) {
+                            elementFactory.createStatementFromText("${pair.second} = itemView.findViewById(R.id.${pair.first});", method)
+                        } else {
+                            elementFactory.createStatementFromText("${pair.second} = findViewById(R.id.${pair.first});", method)
+                        }
+                        writeAction {
+                            method.addAfter(psiStatement, statement)
+                        }
+                    }
+                    return@jump
+                }
+            }
+        }
     }
 
     private fun writeAction(commandName: String = "RemoveButterKnifeWriteAction", runnable: Runnable) {
