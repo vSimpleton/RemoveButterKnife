@@ -1,5 +1,6 @@
 package com.imiyar.removebutterknife
 
+import com.imiyar.removebutterknife.parser.ActionDelegate
 import com.imiyar.removebutterknife.utils.Notifier
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -73,7 +74,7 @@ class Entrance(private val event: AnActionEvent) {
             currFileIndex++
             try {
                 writeAction(psiFile) {
-                    val parsed = ButterActionDelegate(project!!, vFile, psiFile, psiClass).parse()
+                    val parsed = ActionDelegate(project!!, vFile, psiFile, psiClass).parse()
                     if (parsed) {
                         parsedFileCount++
                     }
