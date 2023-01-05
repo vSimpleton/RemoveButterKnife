@@ -19,6 +19,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     private val onClickMethodLists = mutableListOf<Pair<String, String>>()
     private val onLongClickMethodLists = mutableListOf<Pair<String, String>>()
     private val onTouchMethodLists = mutableListOf<Pair<String, String>>()
+    protected val innerBindViewFieldLists = mutableListOf<Pair<String, String>>()
 
     val elementFactory = JavaPsiFacade.getInstance(project).elementFactory
 
@@ -28,18 +29,27 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
         deleteButterKnifeBindStatement()
     }
 
+    /**
+     * 遍历所有字段并找到@BindView注解
+     * @param isDelete 是否删除@BindView注解的字段 true -> 删除字段  false -> 仅删除注解
+     */
     fun findBindViewAnnotation(isDelete: Boolean = true) {
         psiClass.fields.forEach {
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("BindView") == true) {
                     val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
                     val second = it.name
-                    bindViewFieldLists.add(Pair(first, second))
-
-                    // 是否删除@BindView注解相关的字段
                     if (isDelete) {
-                        writeAction {
+                        bindViewFieldLists.add(Pair(first, second))
+                    } else {
+                        innerBindViewFieldLists.add(Pair(first, second))
+                    }
+
+                    writeAction {
+                        if (isDelete) {
                             it.delete()
+                        } else {
+                            psiAnnotation.delete()
                         }
                     }
                 }
@@ -47,6 +57,9 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
         }
     }
 
+    /**
+     * 遍历所有方法并找到@OnClick / @OnLongClick / @OnTouch注解
+     */
     fun findOnClickAnnotation() {
         psiClass.methods.forEach {
             it.annotations.forEach { psiAnnotation ->
@@ -140,10 +153,10 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     }
 
     /**
-     * 插入initListener方法
+     * 插入initListener方法(ViewBinding使用)
      * @param psiMethod 需要插入的地方（如：Activity的onCreate、Fragment的oonViewCreated）
      */
-    protected fun insertOnClickMethod(psiMethod: PsiMethod) {
+    protected fun insertOnClickMethodByVB(psiMethod: PsiMethod) {
         val psiMethods = psiClass.findMethodsByName("initListener", false)
         if (psiMethods.isEmpty() && (onClickMethodLists.isNotEmpty() || onLongClickMethodLists.isNotEmpty())) {
             val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
@@ -169,6 +182,21 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
         }
         onTouchMethodLists.forEach { pair ->
             listenerMethod.lastChild.add(elementFactory.createStatementFromText(getOnTouchStatement(pair), psiClass))
+        }
+    }
+
+    /**
+     * 使用findViewById插入的@OnClick监听
+     */
+    protected fun insertOnClickMethodByFVB(psiMethod: PsiMethod, parameterName: String) {
+        onClickMethodLists.forEach { pair ->
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnClickStatement(pair, parameterName), psiClass))
+        }
+        onLongClickMethodLists.forEach { pair ->
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnLongClickStatement(pair, parameterName), psiClass))
+        }
+        onTouchMethodLists.forEach { pair ->
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnTouchStatement(pair, parameterName), psiClass))
         }
     }
 
@@ -210,28 +238,46 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     /**
      * 插入的@OnClcik替代语句
      */
-    private fun getOnClickStatement(pair: Pair<String, String>): String {
-        return "mBinding.${pair.first.underLineToHump()}.setOnClickListener(view -> ${pair.second});\n"
+    private fun getOnClickStatement(pair: Pair<String, String>, parameterName: String = ""): String {
+        return if (parameterName.isNotEmpty()) {
+            "$parameterName.findViewById(R.id.${pair.first}).setOnClickListener(view -> ${pair.second});\n"
+        } else {
+            "mBinding.${pair.first.underLineToHump()}.setOnClickListener(view -> ${pair.second});\n"
+        }
     }
 
     /**
      * 插入的@OnLongClcik替代语句
      */
-    private fun getOnLongClickStatement(pair: Pair<String, String>): String {
-        return "mBinding.${pair.first.underLineToHump()}.setOnLongClickListener(view -> {\n" +
-                "${pair.second};\n" +
-                "return false;\n" +
-                "});\n"
+    private fun getOnLongClickStatement(pair: Pair<String, String>, parameterName: String = ""): String {
+        return if (parameterName.isNotEmpty()) {
+            "$parameterName.findViewById(R.id.${pair.first}).setOnLongClickListener(view -> {\n" +
+                    "${pair.second};\n" +
+                    "return false;\n" +
+                    "});\n"
+        } else {
+            "mBinding.${pair.first.underLineToHump()}.setOnLongClickListener(view -> {\n" +
+                    "${pair.second};\n" +
+                    "return false;\n" +
+                    "});\n"
+        }
     }
 
     /**
      * 插入的@OnTouch替代语句
      */
-    private fun getOnTouchStatement(pair: Pair<String, String>): String {
-        return "mBinding.${pair.first.underLineToHump()}.setOnTouchListener((view, event) -> {\n" +
-                "${pair.second};\n" +
-                "return false;\n" +
-                "});\n"
+    private fun getOnTouchStatement(pair: Pair<String, String>, parameterName: String = ""): String {
+        return if (parameterName.isNotEmpty()) {
+            "$parameterName.findViewById(R.id.${pair.first}).setOnTouchListener((view, event) -> {\n" +
+                    "${pair.second};\n" +
+                    "return false;\n" +
+                    "});\n"
+        } else {
+            "mBinding.${pair.first.underLineToHump()}.setOnTouchListener((view, event) -> {\n" +
+                    "${pair.second};\n" +
+                    "return false;\n" +
+                    "});\n"
+        }
     }
 
     /**
@@ -313,8 +359,6 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     private fun writeAction(commandName: String = "RemoveButterKnifeWriteAction", runnable: Runnable) {
         WriteCommandAction.runWriteCommandAction(project, commandName, "RemoveButterKnifeGroupID", runnable, psiJavaFile)
     }
-
-    open fun beforeInit() {}
 
     // 寻找viewBinding插入的锚点
     open fun findViewInsertAnchor() {}

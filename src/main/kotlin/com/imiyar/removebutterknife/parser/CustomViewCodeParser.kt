@@ -10,12 +10,8 @@ import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiJavaFile
 import com.intellij.psi.PsiMethod
 
-class CustomViewCodeParser(
-    private val project: Project,
-    private val vFile: VirtualFile,
-    private val psiJavaFile: PsiJavaFile,
-    private val psiClass: PsiClass
-) : BaseCodeParser(project, psiJavaFile, psiClass) {
+class CustomViewCodeParser(project: Project, private val vFile: VirtualFile, psiJavaFile: PsiJavaFile, private val psiClass: PsiClass) :
+    BaseCodeParser(project, psiJavaFile, psiClass) {
 
     init {
         findBindViewAnnotation()
@@ -54,6 +50,15 @@ class CustomViewCodeParser(
                 changeBindViewStatement(statement)
             }
         }
+
+        // 内部类也可能使用外部类的变量
+        psiClass.innerClasses.forEach {
+            it.methods.forEach { method ->
+                method.body?.statements?.forEach { statement ->
+                    changeBindViewStatement(statement)
+                }
+            }
+        }
     }
 
     private fun findLayoutMethod(): PsiMethod? {
@@ -72,7 +77,7 @@ class CustomViewCodeParser(
     override fun findClickInsertAnchor() {
         val method = findLayoutMethod()
         method?.let {
-            insertOnClickMethod(it)
+            insertOnClickMethodByVB(it)
         }
     }
 

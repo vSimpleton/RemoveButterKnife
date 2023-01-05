@@ -8,12 +8,8 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiJavaFile
 
-class ActivityCodeParser(
-    private val project: Project,
-    private val vFile: VirtualFile,
-    private val psiJavaFile: PsiJavaFile,
-    private val psiClass: PsiClass
-) : BaseCodeParser(project, psiJavaFile, psiClass) {
+class ActivityCodeParser(project: Project, private val vFile: VirtualFile, psiJavaFile: PsiJavaFile, private val psiClass: PsiClass) :
+    BaseCodeParser(project, psiJavaFile, psiClass) {
 
     init {
         findBindViewAnnotation()
@@ -40,10 +36,19 @@ class ActivityCodeParser(
                 changeBindViewStatement(statement)
             }
         }
+
+        // 内部类也可能使用外部类的变量
+        psiClass.innerClasses.forEach {
+            it.methods.forEach { method ->
+                method.body?.statements?.forEach { statement ->
+                    changeBindViewStatement(statement)
+                }
+            }
+        }
     }
 
     override fun findClickInsertAnchor() {
         val onCreateMethod = psiClass.findMethodsByName("onCreate", false)[0]
-        insertOnClickMethod(onCreateMethod)
+        insertOnClickMethodByVB(onCreateMethod)
     }
 }

@@ -25,13 +25,14 @@ class ActionDelegate(private val project: Project, private val vFile: VirtualFil
     }
 
     private fun checkClassType(psiClass: PsiClass) {
-        // TODO 优化 -> 使用while循环获取更上一层的父类
         val superType = psiClass.superClassType.toString()
         if (superType.contains("Activity")) {
             ActivityCodeParser(project, vFile, psiJavaFile, psiClass).execute()
         } else if (superType.contains("Fragment")) {
             FragmentCodeParser(project, vFile, psiJavaFile, psiClass).execute()
         } else if (superType.contains("ViewHolder") || superType.contains("Adapter<ViewHolder>")) {
+            AdapterCodeParser(project, psiJavaFile, psiClass).execute()
+        } else if (superType.contains("Adapter")) {
 
         } else if (superType.contains("Dialog")) {
 

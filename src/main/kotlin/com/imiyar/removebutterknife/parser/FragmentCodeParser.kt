@@ -8,12 +8,8 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiJavaFile
 
-class FragmentCodeParser(
-    private val project: Project,
-    private val vFile: VirtualFile,
-    private val psiJavaFile: PsiJavaFile,
-    private val psiClass: PsiClass
-) : BaseCodeParser(project, psiJavaFile, psiClass) {
+class FragmentCodeParser(project: Project, private val vFile: VirtualFile, psiJavaFile: PsiJavaFile, private val psiClass: PsiClass) :
+    BaseCodeParser(project, psiJavaFile, psiClass) {
 
     init {
         findBindViewAnnotation()
@@ -38,7 +34,7 @@ class FragmentCodeParser(
 
         onCreateViewMethod.body?.statements?.forEach { statement ->
             if (statement.firstChild.text.trim().contains("inflater.inflate(")) {
-                val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${onCreateViewMethod.parameters[0].name}, ${onCreateViewMethod.parameters[1].name}, false);", psiClass)
+                val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${onCreateViewMethod.parameterList.parameters[0].name}, ${onCreateViewMethod.parameterList.parameters[1].name}, false);", psiClass)
                 changeBindingStatement(onCreateViewMethod, statement, bindingStatement)
             } else if (statement.firstChild.text.trim().contains("return")) {
                 val returnStatement = elementFactory.createStatementFromText("return mBinding.getRoot();", psiClass)
@@ -51,11 +47,20 @@ class FragmentCodeParser(
                 changeBindViewStatement(statement)
             }
         }
+
+        // 内部类也可能使用外部类的变量
+        psiClass.innerClasses.forEach {
+            it.methods.forEach { method ->
+                method.body?.statements?.forEach { statement ->
+                    changeBindViewStatement(statement)
+                }
+            }
+        }
     }
 
     override fun findClickInsertAnchor() {
         val onViewCreatedMethod = psiClass.findMethodsByName("onViewCreated", false)[0]
-        insertOnClickMethod(onViewCreatedMethod)
+        insertOnClickMethodByVB(onViewCreatedMethod)
     }
 
 }
