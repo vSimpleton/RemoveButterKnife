@@ -48,13 +48,15 @@ class AdapterCodeParser(project: Project, psiJavaFile: PsiJavaFile, private val 
      * 找到ButterKnife.bind的绑定语句所在的方法
      */
     private fun findMethodByButterKnifeBind() {
-        psiClass.methods.forEach jump@{ method ->
-            method.body?.statements?.forEach { statement ->
-                if (statement.text.trim().contains("ButterKnife.bind(")) {
-                    if (method.isConstructor) {
-                        resultMethod = method
-                        resultStatement = statement
-                        return@jump
+        run jump@{
+            psiClass.methods.forEach { method ->
+                method.body?.statements?.forEach { statement ->
+                    if (statement.text.trim().contains("ButterKnife.bind(")) {
+                        if (method.isConstructor) {
+                            resultMethod = method
+                            resultStatement = statement
+                            return@jump
+                        }
                     }
                 }
             }

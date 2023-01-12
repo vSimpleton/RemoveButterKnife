@@ -54,6 +54,9 @@ fun String.withViewBinding(): String {
     return builder.toString()
 }
 
+/**
+ * 仅包含target，如target为view，则不会返回viewModel相关的
+ */
 fun String.isOnlyContainsTarget(target: String): Boolean {
     val regex = "\\b$target\\b"
     val mather = Pattern.compile(regex).matcher(this)
@@ -61,4 +64,16 @@ fun String.isOnlyContainsTarget(target: String): Boolean {
         return true
     }
     return false
+}
+
+/**
+ * 获取()里的内容
+ */
+fun String.getBracketContent(): String {
+    val regex = "(?<=bind\\().*?(?=\\);)"
+    val mather = Pattern.compile(regex).matcher(this)
+    if (mather.find()) {
+        return mather.group(0)
+    }
+    return ""
 }

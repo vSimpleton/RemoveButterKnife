@@ -35,7 +35,7 @@ class ActionDelegate(private val project: Project, private val vFile: VirtualFil
         } else if (superType.contains("Adapter")) {
 
         } else if (superType.contains("Dialog")) {
-
+            DialogCodeParser(project, vFile, psiJavaFile, psiClass).execute()
         } else { // 自定义View
             CustomViewCodeParser(project, vFile, psiJavaFile, psiClass).execute()
         }

@@ -22,13 +22,12 @@ class FragmentCodeParser(project: Project, private val vFile: VirtualFile, psiJa
         val onCreateViewMethod = psiClass.findMethodsByName("onCreateView", false)[0]
         // 需要删除的语句锚点有：inflater.inflate( 、 return
         onCreateViewMethod.body?.statements?.forEach { statement ->
-            if (statement.firstChild.text.trim().contains("R.layout.")) {
+            if (statement.text.trim().contains("R.layout.")) {
                 layoutRes = statement.firstChild.text.trim().getLayoutRes()
                 // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
                 bindingName = layoutRes.underLineToHump().withViewBinding()
                 addBindingField("private $bindingName mBinding;\n")
                 addImportStatement(vFile, layoutRes)
-                return@forEach
             }
         }
 
