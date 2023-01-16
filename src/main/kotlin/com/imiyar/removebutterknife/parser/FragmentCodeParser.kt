@@ -41,6 +41,13 @@ class FragmentCodeParser(project: Project, private val vFile: VirtualFile, psiJa
             }
         }
 
+        val onViewCreatedMethod = psiClass.findMethodsByName("onViewCreated", false)[0]
+        onViewCreatedMethod.body?.statements?.forEach { statement ->
+            if (statement.text.trim().contains("super.onViewCreated(")) {
+                addBindViewListStatement(onViewCreatedMethod, statement)
+            }
+        }
+
         psiClass.methods.forEach {
             it.body?.statements?.forEach { statement ->
                 changeBindViewStatement(statement)

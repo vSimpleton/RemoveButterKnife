@@ -26,6 +26,7 @@ class ActivityCodeParser(project: Project, private val vFile: VirtualFile, psiJa
                 val bindingName = layoutRes.underLineToHump().withViewBinding()
                 val afterStatement = elementFactory.createStatementFromText("setContentView(mBinding.getRoot());", psiClass)
                 addBindingField("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n")
+                addBindViewListStatement(onCreateMethod, statement)
                 changeBindingStatement(onCreateMethod, statement, afterStatement)
                 addImportStatement(vFile, layoutRes)
             }

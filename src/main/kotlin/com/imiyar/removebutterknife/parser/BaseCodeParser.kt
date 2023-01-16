@@ -15,11 +15,12 @@ import java.io.InputStreamReader
 
 open class BaseCodeParser(private val project: Project, private val psiJavaFile: PsiJavaFile, private val psiClass: PsiClass) {
 
-    private val bindViewFieldLists = mutableListOf<Pair<String, String>>()
-    private val onClickMethodLists = mutableListOf<Pair<String, String>>()
-    private val onLongClickMethodLists = mutableListOf<Pair<String, String>>()
-    private val onTouchMethodLists = mutableListOf<Pair<String, String>>()
-    protected val innerBindViewFieldLists = mutableListOf<Pair<String, String>>()
+    private val bindViewFieldLists = mutableListOf<Pair<String, String>>() // 使用@BindView的属性与单个字段
+    private val bindViewListFieldLists = mutableListOf<Triple<String, String, MutableList<String>>>() // 使用@BindView的属性与多个字段
+    private val onClickMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnClick的属性与方法名
+    private val onLongClickMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnLongClick的属性与方法名
+    private val onTouchMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnTouch的属性与方法名
+    protected val innerBindViewFieldLists = mutableListOf<Pair<String, String>>() // 内部类使用@BindView的属性与单个字段
 
     val elementFactory = JavaPsiFacade.getInstance(project).elementFactory
 
@@ -37,19 +38,30 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
         psiClass.fields.forEach {
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("BindView") == true) {
-                    val first = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
-                    val second = it.name
-                    if (isDelete) {
-                        bindViewFieldLists.add(Pair(first, second))
-                    } else {
-                        innerBindViewFieldLists.add(Pair(first, second))
-                    }
-
-                    writeAction {
-                        if (isDelete) {
-                            it.delete()
-                        } else {
+                    if ((psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.size ?: 0) > 1) {
+                        val first = it.name
+                        val second = mutableListOf<String>()
+                        psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.forEach { id ->
+                            second.add(id)
+                        }
+                        bindViewListFieldLists.add(Triple(it.type.toString(), first, second))
+                        writeAction{
                             psiAnnotation.delete()
+                        }
+                    } else {
+                        val first = it.name
+                        val second = psiAnnotation.findAttributeValue("value")?.lastChild?.text.toString()
+                        if (isDelete) {
+                            bindViewFieldLists.add(Pair(first, second))
+                        } else {
+                            innerBindViewFieldLists.add(Pair(first, second))
+                        }
+                        writeAction {
+                            if (isDelete) {
+                                it.delete()
+                            } else {
+                                psiAnnotation.delete()
+                            }
                         }
                     }
                 }
@@ -65,11 +77,18 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
             it.annotations.forEach { psiAnnotation ->
                 if (psiAnnotation.qualifiedName?.contains("OnClick") == true || psiAnnotation.qualifiedName?.contains("OnLongClick") == true || psiAnnotation.qualifiedName?.contains("OnTouch") == true) {
                     psiAnnotation.findAttributeValue("value")?.text?.getAnnotationIds()?.forEach { id ->
-                        var second = "${it.name}()"
-                        if (it.parameters.isNotEmpty()) {
-                            // TODO 需要考虑多参数的情况，比如OnTouch有两个参数（累了，晚点考虑）
-                            second = "${it.name}(view)"
+                        var second = "${it.name}("
+                        it.parameterList.parameters.forEachIndexed { index, params ->
+                            if (params.type.toString() == "PsiType:View") {
+                                second += "view"
+                            } else if (params.type.toString() == "PsiType:MotionEvent") {
+                                second += "event"
+                            }
+                            if (index != it.parameterList.parameters.size - 1) {
+                                second += ", "
+                            }
                         }
+                        second += ")"
                         if (psiAnnotation.qualifiedName?.contains("OnClick") == true) {
                             onClickMethodLists.add(Pair(id, second))
                         } else if (psiAnnotation.qualifiedName?.contains("OnLongClick") == true) {
@@ -131,14 +150,42 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     }
 
     /**
+     * 为使用这种形式的@BindViews({R.id.layout_tab_equipment, R.id.layout_tab_community, R.id.layout_tab_home})添加list
+     */
+    protected fun addBindViewListStatement(psiMethod: PsiMethod, psiStatement: PsiStatement) {
+        bindViewListFieldLists.forEachIndexed { index, triple ->
+            writeAction {
+                if (triple.first.contains("PsiType:List")) {
+                    psiMethod.addAfter(elementFactory.createStatementFromText("${triple.second} = new ArrayList<>();\n", psiClass), psiStatement)
+                } else {
+                    psiMethod.addAfter(elementFactory.createStatementFromText("${triple.second} = new ${triple.first.substring(8, triple.first.length - 1)}${triple.third.size}];\n", psiClass), psiStatement)
+                    println(triple.first.substring(8, triple.first.length - 1))
+                }
+
+                psiMethod.body?.statements?.forEach { statement ->
+                    if (statement.text.trim() == "${triple.second} = new ArrayList<>();" || statement.text.trim() == "${triple.second} = new ${triple.first.substring(8, triple.first.length - 1)}${triple.third.size}];") {
+                        triple.third.forEachIndexed { index, name ->
+                            if (triple.first.contains("PsiType:List")) {
+                                psiClass.addAfter(elementFactory.createStatementFromText("${triple.second}.add(mBinding.${name.underLineToHump()});\n", psiClass), statement)
+                            } else {
+                                psiClass.addAfter(elementFactory.createStatementFromText("${triple.second}[$index] = mBinding.${name.underLineToHump()};\n", psiClass), statement)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * 把原本使用@BindView的属性修改为mBinding.xxx
      * @param psiStatement 需要修改的statement
      */
     protected fun changeBindViewStatement(psiStatement: PsiStatement) {
         var replaceText = psiStatement.text.trim()
         bindViewFieldLists.forEachIndexed { index, pair ->
-            if (replaceText.isOnlyContainsTarget(pair.second) && !replaceText.isOnlyContainsTarget("R.id.${pair.second}")) {
-                replaceText = replaceText.replace("\\b${pair.second}\\b".toRegex(), "mBinding.${pair.first.underLineToHump()}")
+            if (replaceText.isOnlyContainsTarget(pair.first) && !replaceText.isOnlyContainsTarget("R.id.${pair.first}")) {
+                replaceText = replaceText.replace("\\b${pair.first}\\b".toRegex(), "mBinding.${pair.second.underLineToHump()}")
             }
             if (index == bindViewFieldLists.size - 1) {
                 if (replaceText != psiStatement.text.trim()) {
@@ -213,7 +260,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
 
             psiClass.methods.forEach {
                 it.body?.statements?.forEach { statement ->
-                    if (statement.firstChild.text.trim().contains("ButterKnife.bind(")) {
+                    if (statement.text.trim().contains("ButterKnife.bind(")) {
                         statement.delete()
                     }
                 }

@@ -22,7 +22,7 @@ class AdapterCodeParser(project: Project, psiJavaFile: PsiJavaFile, private val 
         resultMethod?.let {
             innerBindViewFieldLists.forEach { pair ->
                 resultStatement?.let { statement ->
-                    addMethodStatement(it, statement, elementFactory.createStatementFromText("${pair.second} = $parameterName.findViewById(R.id.${pair.first});", psiClass))
+                    addMethodStatement(it, statement, elementFactory.createStatementFromText("${pair.first} = $parameterName.findViewById(R.id.${pair.second});", psiClass))
                 }
             }
         }
