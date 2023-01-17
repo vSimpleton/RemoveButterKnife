@@ -50,6 +50,6 @@ class ActivityCodeParser(project: Project, private val vFile: VirtualFile, psiJa
 
     override fun findClickInsertAnchor() {
         val onCreateMethod = psiClass.findMethodsByName("onCreate", false)[0]
-        insertOnClickMethodByVB(onCreateMethod)
+        insertOnClickMethod(onCreateMethod)
     }
 }

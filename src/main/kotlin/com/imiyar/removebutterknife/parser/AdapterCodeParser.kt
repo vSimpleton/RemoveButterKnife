@@ -66,7 +66,7 @@ class AdapterCodeParser(project: Project, psiJavaFile: PsiJavaFile, private val 
     override fun findClickInsertAnchor() {
         val parameterName = findMethodParameterName()
         resultMethod?.let {
-            insertOnClickMethodByFVB(it, parameterName)
+            insertOnClickStatementByFVB(it, parameterName)
         }
     }
 

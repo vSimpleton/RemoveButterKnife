@@ -20,7 +20,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     private val onClickMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnClick的属性与方法名
     private val onLongClickMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnLongClick的属性与方法名
     private val onTouchMethodLists = mutableListOf<Pair<String, String>>() // 使用@OnTouch的属性与方法名
-    protected val innerBindViewFieldLists = mutableListOf<Pair<String, String>>() // 内部类使用@BindView的属性与单个字段
+    protected val innerBindViewFieldLists = mutableListOf<Pair<String, String>>() // 需要使用fvb形式的类 -- @BindView的属性与单个字段
 
     val elementFactory = JavaPsiFacade.getInstance(project).elementFactory
 
@@ -164,11 +164,11 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
 
                 psiMethod.body?.statements?.forEach { statement ->
                     if (statement.text.trim() == "${triple.second} = new ArrayList<>();" || statement.text.trim() == "${triple.second} = new ${triple.first.substring(8, triple.first.length - 1)}${triple.third.size}];") {
-                        triple.third.forEachIndexed { index, name ->
+                        triple.third.asReversed().forEachIndexed { index, name ->
                             if (triple.first.contains("PsiType:List")) {
                                 psiClass.addAfter(elementFactory.createStatementFromText("${triple.second}.add(mBinding.${name.underLineToHump()});\n", psiClass), statement)
                             } else {
-                                psiClass.addAfter(elementFactory.createStatementFromText("${triple.second}[$index] = mBinding.${name.underLineToHump()};\n", psiClass), statement)
+                                psiClass.addAfter(elementFactory.createStatementFromText("${triple.second}[${triple.third.size - 1 - index}] = mBinding.${name.underLineToHump()};\n", psiClass), statement)
                             }
                         }
                     }
@@ -203,15 +203,21 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
      * 插入initListener方法(ViewBinding使用)
      * @param psiMethod 需要插入的地方（如：Activity的onCreate、Fragment的oonViewCreated）
      */
-    protected fun insertOnClickMethodByVB(psiMethod: PsiMethod) {
+    protected fun insertOnClickMethod(psiMethod: PsiMethod, isVB: Boolean = true, parameterName: String = "") {
         val psiMethods = psiClass.findMethodsByName("initListener", false)
-        if (psiMethods.isEmpty() && (onClickMethodLists.isNotEmpty() || onLongClickMethodLists.isNotEmpty())) {
+        if (psiMethods.isEmpty() && (onClickMethodLists.isNotEmpty() || onLongClickMethodLists.isNotEmpty() || onTouchMethodLists.isNotEmpty())) {
             val createMethod = elementFactory.createMethodFromText("private void initListener() {}\n", psiClass)
             val psiStatement = elementFactory.createStatementFromText("initListener();", psiClass)
             writeAction {
                 psiMethod.addAfter(psiStatement, psiMethod.body?.statements?.last())
                 psiClass.addAfter(createMethod, psiMethod)
-                insertOnClickStatement()
+
+                val listenerMethod = psiClass.findMethodsByName("initListener", false)[0]
+                if (isVB) {
+                    insertOnClickStatementByVB(listenerMethod)
+                } else {
+                    insertOnClickStatementByFVB(listenerMethod, parameterName)
+                }
             }
         }
     }
@@ -219,23 +225,22 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     /**
      * 在initListener中插入setOnClickListener语句
      */
-    private fun insertOnClickStatement() {
-        val listenerMethod = psiClass.findMethodsByName("initListener", false)[0]
+    private fun insertOnClickStatementByVB(psiMethod: PsiMethod) {
         onClickMethodLists.forEach { pair ->
-            listenerMethod.lastChild.add(elementFactory.createStatementFromText(getOnClickStatement(pair), psiClass))
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnClickStatement(pair), psiClass))
         }
         onLongClickMethodLists.forEach { pair ->
-            listenerMethod.lastChild.add(elementFactory.createStatementFromText(getOnLongClickStatement(pair), psiClass))
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnLongClickStatement(pair), psiClass))
         }
         onTouchMethodLists.forEach { pair ->
-            listenerMethod.lastChild.add(elementFactory.createStatementFromText(getOnTouchStatement(pair), psiClass))
+            psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnTouchStatement(pair), psiClass))
         }
     }
 
     /**
      * 使用findViewById插入的@OnClick监听
      */
-    protected fun insertOnClickMethodByFVB(psiMethod: PsiMethod, parameterName: String) {
+    protected fun insertOnClickStatementByFVB(psiMethod: PsiMethod, parameterName: String) {
         onClickMethodLists.forEach { pair ->
             psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnClickStatement(pair, parameterName), psiClass))
         }
@@ -244,6 +249,27 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
         }
         onTouchMethodLists.forEach { pair ->
             psiMethod.lastChild.add(elementFactory.createStatementFromText(getOnTouchStatement(pair, parameterName), psiClass))
+        }
+    }
+
+    /**
+     * 判断并插入initView()方法
+     */
+    protected fun insertInitViewMethod(psiMethod: PsiMethod, afterStatement: PsiStatement) {
+        val psiMethods = psiClass.findMethodsByName("initView", false)
+        if (psiMethods.isEmpty()) {
+            val createMethod = elementFactory.createMethodFromText("private void initView() {}\n", psiClass)
+            val psiStatement = elementFactory.createStatementFromText("initView();", psiClass)
+
+            writeAction {
+                psiMethod.addAfter(psiStatement, afterStatement)
+                psiClass.addAfter(createMethod, psiMethod)
+
+                val initViewMethod = psiClass.findMethodsByName("initView", false)[0]
+                innerBindViewFieldLists.forEach { pair ->
+                    initViewMethod.lastChild.add(elementFactory.createStatementFromText("${pair.first} = findViewById(R.id.${pair.second});", psiClass))
+                }
+            }
         }
     }
 
@@ -287,7 +313,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
      */
     private fun getOnClickStatement(pair: Pair<String, String>, parameterName: String = ""): String {
         return if (parameterName.isNotEmpty()) {
-            "$parameterName.findViewById(R.id.${pair.first}).setOnClickListener(view -> ${pair.second});\n"
+            (if (parameterName == "null") "findViewById" else "$parameterName.findViewById") + "(R.id.${pair.first}).setOnClickListener(view -> ${pair.second});\n"
         } else {
             "mBinding.${pair.first.underLineToHump()}.setOnClickListener(view -> ${pair.second});\n"
         }
@@ -298,7 +324,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
      */
     private fun getOnLongClickStatement(pair: Pair<String, String>, parameterName: String = ""): String {
         return if (parameterName.isNotEmpty()) {
-            "$parameterName.findViewById(R.id.${pair.first}).setOnLongClickListener(view -> {\n" +
+            (if (parameterName == "null") "findViewById" else "$parameterName.findViewById") + "(R.id.${pair.first}).setOnLongClickListener(view -> {\n" +
                     "${pair.second};\n" +
                     "return false;\n" +
                     "});\n"
@@ -315,7 +341,7 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
      */
     private fun getOnTouchStatement(pair: Pair<String, String>, parameterName: String = ""): String {
         return if (parameterName.isNotEmpty()) {
-            "$parameterName.findViewById(R.id.${pair.first}).setOnTouchListener((view, event) -> {\n" +
+            (if (parameterName == "null") "findViewById" else "$parameterName.findViewById") + "(R.id.${pair.first}).setOnTouchListener((view, event) -> {\n" +
                     "${pair.second};\n" +
                     "return false;\n" +
                     "});\n"

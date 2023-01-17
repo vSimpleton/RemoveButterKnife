@@ -107,7 +107,7 @@ class CustomViewCodeParser(project: Project, private val vFile: VirtualFile, psi
     override fun findClickInsertAnchor() {
         val method = findLayoutMethod()
         method?.let {
-            insertOnClickMethodByVB(it)
+            insertOnClickMethod(it)
         }
     }
 

@@ -66,7 +66,7 @@ class FragmentCodeParser(project: Project, private val vFile: VirtualFile, psiJa
 
     override fun findClickInsertAnchor() {
         val onViewCreatedMethod = psiClass.findMethodsByName("onViewCreated", false)[0]
-        insertOnClickMethodByVB(onViewCreatedMethod)
+        insertOnClickMethod(onViewCreatedMethod)
     }
 
 }
