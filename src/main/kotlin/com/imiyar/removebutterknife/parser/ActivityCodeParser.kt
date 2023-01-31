@@ -21,10 +21,10 @@ class ActivityCodeParser(project: Project, private val vFile: VirtualFile, psiJa
         val onCreateMethod = psiClass.findMethodsByName("onCreate", false)[0]
         onCreateMethod.body?.statements?.forEach { statement ->
             if (statement.text.trim().contains("R.layout.")) {
-                val layoutRes = statement.firstChild.text.trim().getLayoutRes()
+                val layoutRes = statement.text.trim().getLayoutRes()
                 // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
                 val bindingName = layoutRes.underLineToHump().withViewBinding()
-                val afterStatement = elementFactory.createStatementFromText("setContentView(mBinding.getRoot());", psiClass)
+                val afterStatement = elementFactory.createStatementFromText(statement.text.toString().replace("R.layout.$layoutRes", "mBinding.getRoot()"), psiClass)
                 addBindingField("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n")
                 addBindViewListStatement(onCreateMethod, statement)
                 changeBindingStatement(onCreateMethod, statement, afterStatement)

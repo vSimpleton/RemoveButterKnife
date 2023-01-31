@@ -22,7 +22,11 @@ class AdapterCodeParser(project: Project, psiJavaFile: PsiJavaFile, private val 
         resultMethod?.let {
             innerBindViewFieldLists.forEach { pair ->
                 resultStatement?.let { statement ->
-                    addMethodStatement(it, statement, elementFactory.createStatementFromText("${pair.first} = $parameterName.findViewById(R.id.${pair.second});", psiClass))
+                    if (parameterName.isNotEmpty()) {
+                        addMethodStatement(it, statement, elementFactory.createStatementFromText("${pair.first} = $parameterName.findViewById(R.id.${pair.second});", psiClass))
+                    } else {
+                        addMethodStatement(it, statement, elementFactory.createStatementFromText("${pair.first} = itemView.findViewById(R.id.${pair.second});", psiClass))
+                    }
                 }
             }
         }
@@ -66,7 +70,11 @@ class AdapterCodeParser(project: Project, psiJavaFile: PsiJavaFile, private val 
     override fun findClickInsertAnchor() {
         val parameterName = findMethodParameterName()
         resultMethod?.let {
-            insertOnClickStatementByFVB(it, parameterName)
+            if (parameterName.isNotEmpty()) {
+                insertOnClickStatementByFVB(it, parameterName)
+            } else {
+                insertOnClickStatementByFVB(it, "itemView")
+            }
         }
     }
 

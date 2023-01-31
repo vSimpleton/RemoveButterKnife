@@ -28,7 +28,7 @@ class ActionDelegate(private val project: Project, private val vFile: VirtualFil
         val superType = psiClass.superClassType.toString()
         if (superType.contains("Activity")) {
             ActivityCodeParser(project, vFile, psiJavaFile, psiClass).execute()
-        } else if (superType.contains("Fragment")) {
+        } else if (superType.contains("Fragment") && !superType.contains("PagerAdapter") && !superType.contains("StateAdapter")) {
             FragmentCodeParser(project, vFile, psiJavaFile, psiClass).execute()
         } else if (superType.contains("ViewHolder") || superType.contains("Adapter<ViewHolder>")) {
             AdapterCodeParser(project, psiJavaFile, psiClass).execute()
