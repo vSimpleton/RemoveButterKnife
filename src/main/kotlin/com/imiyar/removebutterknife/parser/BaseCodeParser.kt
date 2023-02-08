@@ -129,11 +129,20 @@ open class BaseCodeParser(private val project: Project, private val psiJavaFile:
     }
 
     /**
-     * 在方法中添加一个新的statement
+     * 在方法中添加一个新的statement在目标statement的后面
      */
-    protected fun addMethodStatement(method: PsiMethod, statement: PsiStatement, newStatement: PsiStatement) {
+    protected fun addMethodAfterStatement(method: PsiMethod, statement: PsiStatement, newStatement: PsiStatement) {
         writeAction {
             method.addAfter(newStatement, statement)
+        }
+    }
+
+    /**
+     * 在方法中添加一个新的statement在目标statement的前面
+     */
+    protected fun addMethodBeforeStatement(method: PsiMethod, statement: PsiStatement, newStatement: PsiStatement) {
+        writeAction {
+            method.addBefore(newStatement, statement)
         }
     }
 

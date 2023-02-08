@@ -25,8 +25,10 @@ class ActivityCodeParser(project: Project, private val vFile: VirtualFile, psiJa
                 // 把布局名称转换成Binding实例名称。如activity_record_detail -> ActivityRecordDetailBinding
                 val bindingName = layoutRes.underLineToHump().withViewBinding()
                 val afterStatement = elementFactory.createStatementFromText(statement.text.toString().replace("R.layout.$layoutRes", "mBinding.getRoot()"), psiClass)
-                addBindingField("private $bindingName mBinding = $bindingName.inflate(getLayoutInflater());\n")
+                val initStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(getLayoutInflater());", psiClass)
+                addBindingField("private $bindingName mBinding;\n")
                 addBindViewListStatement(onCreateMethod, statement)
+                addMethodBeforeStatement(onCreateMethod, statement, initStatement)
                 changeBindingStatement(onCreateMethod, statement, afterStatement)
                 addImportStatement(vFile, layoutRes)
             }

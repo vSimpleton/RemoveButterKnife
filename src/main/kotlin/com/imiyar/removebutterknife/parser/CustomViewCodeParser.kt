@@ -40,13 +40,13 @@ class CustomViewCodeParser(project: Project, private val vFile: VirtualFile, psi
                     if (statement.text.trim().contains("=")) {
                         array = statement.text.trim().split("=").toTypedArray()
                         if (array[0].isOnlyContainsTarget("View")) { // 已经有局部变量
-                            addMethodStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", psiClass))
+                            addMethodAfterStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", psiClass))
                             changeBindingStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("View view = ${statement.text.trim().split("=")[1]}", psiClass))
                         } else { // 没有局部变量，那就代表有全局变量
-                            addMethodStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(${array[0]});", psiClass))
+                            addMethodAfterStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(${array[0]});", psiClass))
                         }
                     } else { // 没有变量，则手动添加一个局部变量
-                        addMethodStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", psiClass))
+                        addMethodAfterStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("mBinding = $bindingName.bind(view);", psiClass))
                         changeBindingStatement(butterKnifeBindMethod, statement, elementFactory.createStatementFromText("View view = ${statement.text}", psiClass))
                     }
                 } else if (statement.text.trim().contains("ButterKnife.bind(")) {

@@ -36,7 +36,7 @@ class FragmentCodeParser(project: Project, private val vFile: VirtualFile, psiJa
                 val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${onCreateViewMethod.parameterList.parameters[0].name}, " +
                         "${onCreateViewMethod.parameterList.parameters[1].name}, false);", psiClass)
                 val returnStatement = elementFactory.createStatementFromText("return mBinding.getRoot();", psiClass)
-                addMethodStatement(onCreateViewMethod, statement, returnStatement)
+                addMethodAfterStatement(onCreateViewMethod, statement, returnStatement)
                 changeBindingStatement(onCreateViewMethod, statement, bindingStatement)
             } else if (statement.firstChild.text.trim().contains("inflater.inflate(")) {
                 val bindingStatement = elementFactory.createStatementFromText("mBinding = $bindingName.inflate(${onCreateViewMethod.parameterList.parameters[0].name}, ${onCreateViewMethod.parameterList.parameters[1].name}, false);", psiClass)
